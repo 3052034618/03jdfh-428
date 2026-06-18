@@ -1,30 +1,133 @@
 import React from 'react'
 import { useEditor } from '../context/EditorContext'
 import { TENSION_LABELS, TENSION_COLORS } from '../constants/config'
+import type { TensionCurvePoint, TensionFeedback } from '../types'
+
+const VERSION_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
+
+const calculateStats = (curve: TensionCurvePoint[]) => {
+  if (curve.length === 0) return null
+  const values = curve.map(p => p.value)
+  const peak = Math.max(...values)
+  const avg = values.reduce((a, b) => a + b, 0) / values.length
+  const low = Math.min(...values)
+  const peakCount = values.filter(v => v >= 71).length
+  const safeCount = values.filter(v => v <= 35).length
+  const totalTime = curve[curve.length - 1].time - curve[0].time
+  const peakDensity = totalTime > 0 ? (peakCount * 0.5 / totalTime) * 60 : 0
+
+  return { peak, avg, low, peakCount, safeCount, totalTime, peakDensity }
+}
 
 export const TensionFeedbackPanel: React.FC = () => {
-  const { tensionFeedback, tensionCurve, project } = useEditor()
+  const { tensionFeedback, tensionCurve, project, selectedCurveVersionIds, showAllVersions } = useEditor()
+  const [activeVersionId, setActiveVersionId] = React.useState<string | null>(null)
 
-  const stats = React.useMemo(() => {
-    if (tensionCurve.length === 0) return null
-    const values = tensionCurve.map(p => p.value)
-    const peak = Math.max(...values)
-    const avg = values.reduce((a, b) => a + b, 0) / values.length
-    const low = Math.min(...values)
-    const peakCount = values.filter(v => v >= 71).length
-    const safeCount = values.filter(v => v <= 35).length
-    const totalTime = tensionCurve[tensionCurve.length - 1].time - tensionCurve[0].time
-    const peakDensity = totalTime > 0 ? (peakCount * 0.5 / totalTime) * 60 : 0
+  const selectedVersions = React.useMemo(() => {
+    if (showAllVersions) {
+      return project.tensionCurveVersions
+    }
+    return project.tensionCurveVersions.filter(v => selectedCurveVersionIds.includes(v.id))
+  }, [project.tensionCurveVersions, selectedCurveVersionIds, showAllVersions])
 
-    return { peak, avg, low, peakCount, safeCount, totalTime, peakDensity }
-  }, [tensionCurve])
+  const activeVersion = React.useMemo(() => {
+    if (activeVersionId) {
+      return project.tensionCurveVersions.find(v => v.id === activeVersionId)
+    }
+    if (selectedVersions.length > 0) {
+      return selectedVersions[selectedVersions.length - 1]
+    }
+    return null
+  }, [activeVersionId, project.tensionCurveVersions, selectedVersions])
 
-  const goodFeedback = tensionFeedback.find(f => f.type === 'good')
+  const displayCurve = activeVersion ? activeVersion.curve : tensionCurve
+  const displayFeedback = activeVersion ? activeVersion.feedback : tensionFeedback
+
+  const stats = React.useMemo(() => calculateStats(displayCurve), [displayCurve])
+
+  const goodFeedback = displayFeedback.find(f => f.type === 'good')
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts)
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
 
   return (
     <div className="flex flex-col gap-4 h-full overflow-hidden">
+      {selectedVersions.length > 0 && (
+        <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700 flex-shrink-0">
+          <h3 className="text-xs font-semibold text-purple-300 mb-2 uppercase tracking-wider">版本对比</h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setActiveVersionId(null)}
+              className={`px-3 py-1.5 text-xs rounded border transition-all ${
+                activeVersionId === null
+                  ? 'bg-purple-600 border-purple-500 text-white'
+                  : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'
+              }`}
+            >
+              ⚡ 当前编辑
+            </button>
+            {selectedVersions.map((v, idx) => (
+              <button
+                key={v.id}
+                onClick={() => setActiveVersionId(v.id)}
+                className={`px-3 py-1.5 text-xs rounded border transition-all flex items-center gap-1.5 ${
+                  activeVersionId === v.id
+                    ? 'bg-gray-700 border-gray-500 text-white'
+                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                }`}
+              >
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: VERSION_COLORS[idx % VERSION_COLORS.length] }}
+                />
+                <span className="max-w-20 truncate">{v.name}</span>
+              </button>
+            ))}
+          </div>
+          {activeVersion && (
+            <div className="mt-2 p-2 bg-gray-800/50 rounded text-xs">
+              <div className="text-gray-400">
+                <span className="text-gray-500">保存时间:</span> {formatTime(activeVersion.createdAt)}
+              </div>
+              {activeVersion.description && (
+                <div className="text-gray-400 mt-1">
+                  <span className="text-gray-500">备注:</span> {activeVersion.description}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedVersions.length >= 2 && (
+        <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700 flex-shrink-0">
+          <h3 className="text-xs font-semibold text-purple-300 mb-2 uppercase tracking-wider">版本差异</h3>
+          <div className="space-y-2 text-xs">
+            {selectedVersions.map((v, idx) => {
+              const s = calculateStats(v.curve)
+              if (!s) return null
+              const color = VERSION_COLORS[idx % VERSION_COLORS.length]
+              return (
+                <div key={v.id} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                  <span className="w-16 truncate text-gray-300">{v.name}</span>
+                  <span className="text-red-400 font-mono">↑{s.peak}</span>
+                  <span className="text-purple-400 font-mono">≈{Math.round(s.avg)}</span>
+                  <span className="text-green-400 font-mono">↓{s.low}</span>
+                  <span className="text-amber-400 font-mono">⚡{s.peakDensity.toFixed(1)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="p-4 bg-gray-900/60 rounded-lg border border-gray-700 flex-shrink-0">
-        <h3 className="text-sm font-semibold text-purple-300 mb-3 uppercase tracking-wider">节奏统计</h3>
+        <h3 className="text-sm font-semibold text-purple-300 mb-3 uppercase tracking-wider">
+          节奏统计 {activeVersion && <span className="text-gray-500 font-normal text-xs">· {activeVersion.name}</span>}
+        </h3>
         {stats ? (
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 bg-red-900/20 rounded border border-red-900/40">
@@ -97,9 +200,9 @@ export const TensionFeedbackPanel: React.FC = () => {
               </div>
             </div>
           </div>
-        ) : tensionFeedback.length > 0 ? (
+        ) : displayFeedback.length > 0 ? (
           <div className="space-y-2">
-            {tensionFeedback.map(fb => (
+            {displayFeedback.map(fb => (
               <div
                 key={fb.id}
                 className={`p-3 rounded-md border ${

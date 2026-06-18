@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useEditor } from '../context/EditorContext'
 import {
   TENSION_MAX,
@@ -9,18 +9,49 @@ import {
   TENSION_LABELS,
   PX_PER_SECOND,
 } from '../constants/config'
-import type { TensionLevel } from '../types'
+import type { TensionLevel, TensionCurveVersion } from '../types'
 
-const CHART_HEIGHT = 280
+const CHART_HEIGHT = 320
 const PADDING = { top: 20, right: 20, bottom: 40, left: 50 }
 
+const VERSION_COLORS = [
+  '#a855f7',
+  '#06b6d4',
+  '#f59e0b',
+  '#10b981',
+  '#ef4444',
+  '#ec4899',
+  '#6366f1',
+  '#14b8a6',
+]
+
 export const TensionCurveChart: React.FC = () => {
-  const { tensionCurve, tensionFeedback, project, actions, simulationTime, isSimulating } = useEditor()
+  const {
+    tensionCurve,
+    tensionFeedback,
+    project,
+    actions,
+    simulationTime,
+    isSimulating,
+    selectedCurveVersionIds,
+    showAllVersions,
+  } = useEditor()
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [versionName, setVersionName] = useState('')
+  const [versionDesc, setVersionDesc] = useState('')
+
+  const selectedVersions = showAllVersions
+    ? project.tensionCurveVersions
+    : project.tensionCurveVersions.filter(v => selectedCurveVersionIds.includes(v.id))
+
+  const allCurves = [tensionCurve, ...selectedVersions.map(v => v.curve)]
 
   const totalDuration = useMemo(() => {
-    if (tensionCurve.length === 0) return 100
-    return Math.ceil(tensionCurve[tensionCurve.length - 1].time / 10) * 10
-  }, [tensionCurve])
+    const allPoints = allCurves.flat()
+    if (allPoints.length === 0) return 100
+    const maxTime = Math.max(...allPoints.map(p => p.time))
+    return Math.ceil(maxTime / 10) * 10
+  }, [allCurves])
 
   const chartWidth = Math.max(800, totalDuration * PX_PER_SECOND)
   const innerWidth = chartWidth - PADDING.left - PADDING.right
@@ -29,21 +60,14 @@ export const TensionCurveChart: React.FC = () => {
   const timeToX = (t: number) => PADDING.left + (t / totalDuration) * innerWidth
   const valueToY = (v: number) => PADDING.top + innerHeight - (v / TENSION_MAX) * innerHeight
 
-  const pathD = useMemo(() => {
-    if (tensionCurve.length < 2) return ''
-    return tensionCurve
+  const buildPath = (curve: typeof tensionCurve) => {
+    if (curve.length < 2) return ''
+    return curve
       .map((p, i) => `${i === 0 ? 'M' : 'L'} ${timeToX(p.time)} ${valueToY(p.value)}`)
       .join(' ')
-  }, [tensionCurve, totalDuration])
+  }
 
-  const areaD = useMemo(() => {
-    if (tensionCurve.length < 2) return ''
-    const topPath = tensionCurve
-      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${timeToX(p.time)} ${valueToY(p.value)}`)
-      .join(' ')
-    const lastTime = tensionCurve[tensionCurve.length - 1].time
-    return `${topPath} L ${timeToX(lastTime)} ${PADDING.top + innerHeight} L ${timeToX(tensionCurve[0].time)} ${PADDING.top + innerHeight} Z`
-  }, [tensionCurve, totalDuration])
+  const currentPathD = useMemo(() => buildPath(tensionCurve), [tensionCurve, totalDuration])
 
   const sceneNodeRanges = useMemo(() => {
     return project.sceneNodes.map(node => ({
@@ -60,24 +84,134 @@ export const TensionCurveChart: React.FC = () => {
 
   const selectedTension = tensionCurve.find(p => Math.abs(p.time - simulationTime) < 0.3)
 
+  const handleSaveVersion = () => {
+    if (!versionName.trim()) return
+    actions.saveTensionCurveVersion(versionName.trim(), versionDesc.trim())
+    setShowSaveDialog(false)
+    setVersionName('')
+    setVersionDesc('')
+  }
+
+  const formatDate = (ts: number) => {
+    const d = new Date(ts)
+    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+
   return (
     <div className="flex-1 flex flex-col bg-gray-900/40 rounded-lg border border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900/80">
         <div>
           <h3 className="text-sm font-semibold text-purple-300 uppercase tracking-wider">紧张曲线</h3>
-          <p className="text-xs text-gray-400">可视化恐惧节奏，检查峰值分布与喘息恢复</p>
+          <p className="text-xs text-gray-400">可视化恐惧节奏，保存多版本对比</p>
         </div>
-        <button
-          onClick={() => actions.runFullAnalysis()}
-          className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium transition-colors"
-        >
-          📊 运行分析
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => actions.runFullAnalysis()}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium transition-colors"
+          >
+            📊 运行分析
+          </button>
+          <button
+            onClick={() => {
+              setVersionName(`版本 ${project.tensionCurveVersions.length + 1}`)
+              setVersionDesc('')
+              setShowSaveDialog(true)
+            }}
+            disabled={tensionCurve.length === 0}
+            className="px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs font-medium transition-colors"
+          >
+            💾 保存版本
+          </button>
+        </div>
       </div>
+
+      {project.tensionCurveVersions.length > 0 && (
+        <div className="px-4 py-2 border-b border-gray-700 bg-gray-900/50">
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-gray-400">
+              <input
+                type="checkbox"
+                checked={showAllVersions}
+                onChange={e => actions.setShowAllVersions(e.target.checked)}
+                className="rounded bg-gray-800 border-gray-600"
+              />
+              显示全部版本
+            </label>
+            <div className="flex-1 flex flex-wrap gap-2">
+              {project.tensionCurveVersions.map((v, idx) => {
+                const color = VERSION_COLORS[idx % VERSION_COLORS.length]
+                const selected = showAllVersions || selectedCurveVersionIds.includes(v.id)
+                return (
+                  <div
+                    key={v.id}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer transition-all ${
+                      selected ? 'bg-gray-800' : 'bg-gray-800/40 opacity-60'
+                    }`}
+                    onClick={() => !showAllVersions && actions.toggleCurveVersion(v.id)}
+                  >
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ background: selected ? color : '#6b7280' }}
+                    />
+                    <span className={selected ? 'text-gray-200' : 'text-gray-500'}>{v.name}</span>
+                    <span className="text-gray-500 text-[10px]">{formatDate(v.createdAt)}</span>
+                    {!showAllVersions && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation()
+                          actions.deleteTensionCurveVersion(v.id)
+                        }}
+                        className="text-gray-500 hover:text-red-400 ml-1"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSaveDialog && (
+        <div className="px-4 py-3 border-b border-gray-700 bg-gray-800/80">
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              value={versionName}
+              onChange={e => setVersionName(e.target.value)}
+              placeholder="版本名称（如：增加门锁延迟后）"
+              className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm outline-none focus:border-purple-500"
+              autoFocus
+            />
+            <input
+              type="text"
+              value={versionDesc}
+              onChange={e => setVersionDesc(e.target.value)}
+              placeholder="描述（可选）"
+              className="w-48 bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm outline-none focus:border-purple-500"
+            />
+            <button
+              onClick={handleSaveVersion}
+              disabled={!versionName.trim()}
+              className="px-4 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs font-medium"
+            >
+              确认保存
+            </button>
+            <button
+              onClick={() => setShowSaveDialog(false)}
+              className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-medium"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-auto flex-1">
         <div className="p-4" style={{ minWidth: chartWidth + 20 }}>
-          <div className="flex items-center gap-4 mb-3 text-xs">
+          <div className="flex items-center gap-4 mb-3 text-xs flex-wrap">
             {(['safe', 'pressure', 'burst'] as TensionLevel[]).map(level => (
               <div key={level} className="flex items-center gap-1.5">
                 <div className={`w-3 h-3 rounded ${TENSION_COLORS[level].bg} border ${TENSION_COLORS[level].border}`} />
@@ -86,6 +220,24 @@ export const TensionCurveChart: React.FC = () => {
                 </span>
               </div>
             ))}
+            {selectedVersions.length > 0 && (
+              <>
+                <div className="w-px h-4 bg-gray-600" />
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-0.5 bg-purple-500" style={{ height: '3px' }} />
+                  <span className="text-purple-300">当前</span>
+                </div>
+                {selectedVersions.map((v, idx) => (
+                  <div key={v.id} className="flex items-center gap-1.5">
+                    <div
+                      className="w-3"
+                      style={{ height: '3px', background: VERSION_COLORS[idx % VERSION_COLORS.length] }}
+                    />
+                    <span style={{ color: VERSION_COLORS[idx % VERSION_COLORS.length] }}>{v.name}</span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
 
           <svg
@@ -197,14 +349,42 @@ export const TensionCurveChart: React.FC = () => {
               </g>
             ))}
 
+            {selectedVersions.map((v, idx) => {
+              const path = buildPath(v.curve)
+              const color = VERSION_COLORS[idx % VERSION_COLORS.length]
+              return (
+                <g key={v.id}>
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    opacity={0.7}
+                  />
+                  {v.curve.filter(p => p.value >= TENSION_BURST_MIN).map(p => (
+                    <circle
+                      key={`${v.id}-peak-${p.time}`}
+                      cx={timeToX(p.time)}
+                      cy={valueToY(p.value)}
+                      r={2.5}
+                      fill={color}
+                      opacity={0.8}
+                    />
+                  ))}
+                </g>
+              )
+            })}
+
             {tensionCurve.length >= 2 && (
               <>
-                <path d={areaD} fill="url(#curveGradient)" />
                 <path
-                  d={pathD}
+                  d={currentPathD}
                   fill="none"
                   stroke="#a855f7"
-                  strokeWidth={2.5}
+                  strokeWidth={3}
                   strokeLinejoin="round"
                   strokeLinecap="round"
                 />
@@ -216,8 +396,10 @@ export const TensionCurveChart: React.FC = () => {
                 key={`peak-${p.time}`}
                 cx={timeToX(p.time)}
                 cy={valueToY(p.value)}
-                r={3}
+                r={4}
                 fill="#ef4444"
+                stroke="#fff"
+                strokeWidth={1}
               />
             ))}
 
@@ -234,7 +416,7 @@ export const TensionCurveChart: React.FC = () => {
                 <circle
                   cx={timeToX(simulationTime)}
                   cy={valueToY(selectedTension.value)}
-                  r={6}
+                  r={7}
                   fill="#a78bfa"
                   stroke="#fff"
                   strokeWidth={2}

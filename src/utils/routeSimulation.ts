@@ -1,5 +1,14 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { MapWaypoint, MapPosition, EscapeRoute, ChaseSimulationFrame, RouteIssue } from '../types'
+import type { MapWaypoint, MapPosition, EscapeRoute, ChaseSimulationFrame, RouteIssue, CaughtPoint } from '../types'
+
+export interface SimulationResult {
+  frames: ChaseSimulationFrame[]
+  caughtPoint: CaughtPoint | null
+  stuckPoints: { id: string; position: MapPosition; waypointId: string; time: number }[]
+  totalTime: number
+  success: boolean
+  finalDistance: number
+}
 
 const distance = (a: MapPosition, b: MapPosition) =>
   Math.sqrt(Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2))
@@ -13,16 +22,21 @@ export const simulateChase = (
   waypoints: MapWaypoint[],
   playerSpeed: number,
   monsterSpeed: number,
-): ChaseSimulationFrame[] => {
-  if (waypoints.length < 2) return []
+): SimulationResult => {
+  if (waypoints.length < 2) {
+    return { frames: [], caughtPoint: null, stuckPoints: [], totalTime: 0, success: false, finalDistance: 0 }
+  }
 
   const frames: ChaseSimulationFrame[] = []
   const step = 0.1
   const monsterHeadStart = waypoints.length > 2 ? 1.5 : 0
+  const stuckPoints: { id: string; position: MapPosition; waypointId: string; time: number }[] = []
 
   let playerDist = 0
   let monsterDist = -monsterHeadStart * monsterSpeed
   let totalDist = 0
+  let caughtPoint: CaughtPoint | null = null
+  let success = true
 
   const segments: { from: MapWaypoint; to: MapWaypoint; length: number; startDist: number }[] = []
   for (let i = 0; i < waypoints.length - 1; i++) {
@@ -66,6 +80,16 @@ export const simulateChase = (
         ? 20
         : 100 - ((dist - minDist) / (maxDist - minDist)) * 80
 
+    const currentWaypoint = waypoints[playerInfo.waypointIndex]
+    if (currentWaypoint?.isDeadEnd && !stuckPoints.some(s => s.waypointId === currentWaypoint.id)) {
+      stuckPoints.push({
+        id: uuidv4(),
+        position: playerInfo.pos,
+        waypointId: currentWaypoint.id,
+        time: Math.round(time * 10) / 10,
+      })
+    }
+
     frames.push({
       time: Math.round(time * 10) / 10,
       playerPosition: playerInfo.pos,
@@ -75,7 +99,18 @@ export const simulateChase = (
       waypointIndex: playerInfo.waypointIndex,
     })
 
-    if (monsterDist >= playerDist && time > 1) {
+    if (monsterDist >= playerDist && time > 1 && !caughtPoint) {
+      caughtPoint = {
+        id: uuidv4(),
+        position: { ...playerInfo.pos },
+        time: Math.round(time * 10) / 10,
+        routeId: '',
+      }
+      success = false
+      break
+    }
+
+    if (playerDist >= totalDist) {
       break
     }
 
@@ -84,44 +119,56 @@ export const simulateChase = (
     monsterDist += monsterSpeed * step
   }
 
-  return frames
+  return {
+    frames,
+    caughtPoint,
+    stuckPoints,
+    totalTime: Math.round(time * 10) / 10,
+    success,
+    finalDistance: Math.max(0, playerDist - monsterDist),
+  }
 }
 
 export const analyzeRouteIssues = (
-  frames: ChaseSimulationFrame[],
+  result: SimulationResult,
   route: EscapeRoute,
   waypoints: MapWaypoint[],
 ): RouteIssue[] => {
   const issues: RouteIssue[] = []
+  const { frames, caughtPoint, stuckPoints } = result
 
   if (frames.length === 0) return issues
 
-  const caughtFrame = frames.find(f => f.distance < 15 && f.time > 2)
-  if (caughtFrame) {
-    const idx = Math.min(caughtFrame.waypointIndex, waypoints.length - 1)
+  if (caughtPoint) {
+    const idx = Math.min(
+      frames.findIndex(f => f.time >= caughtPoint.time),
+      waypoints.length - 1
+    )
     issues.push({
       id: uuidv4(),
       type: 'caught',
-      position: caughtFrame.playerPosition,
-      waypointId: waypoints[idx]?.id ?? '',
+      position: caughtPoint.position,
+      waypointId: waypoints[Math.max(0, idx)]?.id ?? '',
       routeId: route.id,
-      description: `玩家在第 ${caughtFrame.time.toFixed(1)} 秒被怪物追上`,
+      description: `玩家在第 ${caughtPoint.time.toFixed(1)} 秒被怪物追上`,
       severity: 'critical',
     })
   }
 
+  stuckPoints.forEach(sp => {
+    const wp = waypoints.find(w => w.id === sp.waypointId)
+    issues.push({
+      id: uuidv4(),
+      type: 'stuck',
+      position: sp.position,
+      waypointId: sp.waypointId,
+      routeId: route.id,
+      description: `卡死在死胡同：${wp?.label ?? '未知位置'} (${sp.time.toFixed(1)}s)`,
+      severity: 'critical',
+    })
+  })
+
   waypoints.forEach((wp, idx) => {
-    if (wp.isDeadEnd) {
-      issues.push({
-        id: uuidv4(),
-        type: 'stuck',
-        position: wp.position,
-        waypointId: wp.id,
-        routeId: route.id,
-        description: `路线进入死胡同：${wp.label}`,
-        severity: 'critical',
-      })
-    }
     if (wp.isJunction && idx < waypoints.length - 1) {
       const nextWp = waypoints[idx + 1]
       issues.push({
@@ -137,7 +184,7 @@ export const analyzeRouteIssues = (
   })
 
   for (let i = 10; i < frames.length; i += 10) {
-    if (frames[i].distance < 40 && !issues.some(iss => iss.type === 'caught')) {
+    if (frames[i].distance < 40 && !caughtPoint) {
       issues.push({
         id: uuidv4(),
         type: 'caught',
@@ -153,3 +200,4 @@ export const analyzeRouteIssues = (
 
   return issues
 }
+

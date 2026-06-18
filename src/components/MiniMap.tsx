@@ -1,21 +1,38 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { useEditor } from '../context/EditorContext'
-import type { MapWaypoint, MapPosition } from '../types'
+import type { MapWaypoint, MapPosition, CaughtPoint } from '../types'
 
 const MAP_WIDTH = 1000
 const MAP_HEIGHT = 500
 
 export const MiniMap: React.FC = () => {
-  const { project, selectedRouteId, simulationFrames, simulationTime, isSimulating, actions, routeIssues } = useEditor()
+  const {
+    project,
+    selectedRouteId,
+    simulationFrames,
+    simulationTime,
+    isSimulating,
+    actions,
+    routeIssues,
+    caughtPoints,
+    simulationResults,
+  } = useEditor()
   const svgRef = useRef<SVGSVGElement>(null)
   const [draggingWaypoint, setDraggingWaypoint] = useState<string | null>(null)
+
+  const selectedRoute = project.routes.find(r => r.id === selectedRouteId)
+  const result = selectedRoute ? simulationResults[selectedRoute.id] : null
+  const frames = selectedRoute ? simulationFrames[selectedRoute.id] ?? [] : []
+  const frameIndex = Math.min(Math.floor(simulationTime / 0.1), frames.length - 1)
+  const currentFrame = frames[frameIndex]
+  const caughtPoint = selectedRoute ? caughtPoints[selectedRoute.id] : null
+  const stuckPoints = result?.stuckPoints ?? []
 
   useEffect(() => {
     if (!isSimulating) return
     let frame: number
     let startTime = performance.now()
-    const maxFrames = simulationFrames[selectedRouteId ?? '']?.length ?? 0
-    const totalDuration = maxFrames * 0.1
+    const totalDuration = frames.length * 0.1
 
     const animate = (now: number) => {
       const elapsed = (now - startTime) / 1000
@@ -29,12 +46,7 @@ export const MiniMap: React.FC = () => {
     }
     frame = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(frame)
-  }, [isSimulating, simulationFrames, selectedRouteId, actions])
-
-  const selectedRoute = project.routes.find(r => r.id === selectedRouteId)
-  const frames = selectedRoute ? simulationFrames[selectedRoute.id] ?? [] : []
-  const frameIndex = Math.min(Math.floor(simulationTime / 0.1), frames.length - 1)
-  const currentFrame = frames[frameIndex]
+  }, [isSimulating, frames.length, actions])
 
   const getScreenPos = (pos: MapPosition): MapPosition => ({
     x: pos.x + 50,
@@ -90,17 +102,47 @@ export const MiniMap: React.FC = () => {
 
   const waypointIssues = routeIssues.filter(i => selectedRouteId && i.routeId === selectedRouteId)
 
+  const stats = useMemo(() => {
+    if (!result || frames.length === 0) return null
+    const distValues = frames.map(f => f.distance)
+    const minDist = Math.min(...distValues)
+    const avgDist = distValues.reduce((a, b) => a + b, 0) / distValues.length
+    return {
+      totalTime: result.totalTime,
+      success: result.success,
+      finalDistance: result.finalDistance,
+      minDistance: minDist,
+      avgDistance: Math.round(avgDist),
+    }
+  }, [result, frames])
+
   return (
     <div className="flex-1 flex flex-col bg-gray-900/40 rounded-lg border border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-900/80">
         <div>
           <h3 className="text-sm font-semibold text-purple-300 uppercase tracking-wider">玩家路线预览</h3>
-          <p className="text-xs text-gray-400">双击添加路点 · 拖动调整位置</p>
+          <p className="text-xs text-gray-400">双击添加路点 · 拖动调整位置 · 点击播放追逐</p>
         </div>
         <div className="flex items-center gap-2">
+          {stats && (
+            <div className="flex items-center gap-3 mr-2 text-xs">
+              <span className={stats.success ? 'text-green-400' : 'text-red-400'}>
+                {stats.success ? '✓ 成功逃脱' : '✗ 被捕获'}
+              </span>
+              <span className="text-gray-400">
+                总时长: <span className="text-white font-mono">{stats.totalTime.toFixed(1)}s</span>
+              </span>
+              <span className="text-gray-400">
+                最近距离: <span className={stats.minDistance < 30 ? 'text-red-400' : 'text-white font-mono'}>{stats.minDistance}</span>
+              </span>
+            </div>
+          )}
           <button
             onClick={() => {
               actions.setSimulationTime(0)
+              if (selectedRouteId) {
+                actions.simulateRoute(selectedRouteId)
+              }
               actions.startSimulation()
             }}
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium transition-colors"
@@ -180,6 +222,64 @@ export const MiniMap: React.FC = () => {
               </g>
             )
           })}
+
+          {stuckPoints.map(sp => {
+            const pos = getScreenPos(sp.position)
+            return (
+              <g key={sp.id}>
+                <circle cx={pos.x} cy={pos.y} r={24} fill="#7f1d1d" opacity={0.2} />
+                <circle cx={pos.x} cy={pos.y} r={16} fill="#7f1d1d" stroke="#ef4444" strokeWidth={2} />
+                <text x={pos.x} y={pos.y + 4} textAnchor="middle" fill="#fff" fontSize="12" fontWeight="bold">
+                  🚫
+                </text>
+                <text x={pos.x} y={pos.y + 40} textAnchor="middle" fill="#fca5a5" fontSize="10">
+                  卡死点 {sp.time.toFixed(1)}s
+                </text>
+              </g>
+            )
+          })}
+
+          {caughtPoint && (
+            <g>
+              <circle
+                cx={getScreenPos(caughtPoint.position).x}
+                cy={getScreenPos(caughtPoint.position).y}
+                r={32}
+                fill="#dc2626"
+                opacity={0.15}
+              >
+                <animate attributeName="r" values="28;36;28" dur="1.5s" repeatCount="indefinite" />
+              </circle>
+              <circle
+                cx={getScreenPos(caughtPoint.position).x}
+                cy={getScreenPos(caughtPoint.position).y}
+                r={20}
+                fill="#7f1d1d"
+                stroke="#ef4444"
+                strokeWidth={3}
+              />
+              <text
+                x={getScreenPos(caughtPoint.position).x}
+                y={getScreenPos(caughtPoint.position).y + 5}
+                textAnchor="middle"
+                fill="#fff"
+                fontSize="16"
+                fontWeight="bold"
+              >
+                💀
+              </text>
+              <text
+                x={getScreenPos(caughtPoint.position).x}
+                y={getScreenPos(caughtPoint.position).y + 45}
+                textAnchor="middle"
+                fill="#fca5a5"
+                fontSize="11"
+                fontWeight="bold"
+              >
+                追上点 {caughtPoint.time.toFixed(1)}s
+              </text>
+            </g>
+          )}
 
           {project.waypoints.map(wp => {
             const pos = getScreenPos(wp.position)

@@ -1,9 +1,24 @@
-import React, { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
-import type { ProjectData, SceneNode, MapWaypoint, EscapeRoute, TensionCurvePoint, TensionFeedback, RouteIssue, ChaseSimulationFrame } from '../types'
+import type {
+  ProjectData,
+  SceneNode,
+  MapWaypoint,
+  EscapeRoute,
+  TensionCurvePoint,
+  TensionFeedback,
+  RouteIssue,
+  ChaseSimulationFrame,
+  TensionCurveVersion,
+  CaughtPoint,
+} from '../types'
 import { createSampleProject } from '../data/sampleProject'
 import { calculateTensionCurve, analyzeTensionCurve } from '../utils/tensionAnalysis'
-import { simulateChase, analyzeRouteIssues } from '../utils/routeSimulation'
+import { simulateChase, analyzeRouteIssues, type SimulationResult } from '../utils/routeSimulation'
+
+interface SimulationResults {
+  [routeId: string]: SimulationResult
+}
 
 interface EditorContextType {
   project: ProjectData
@@ -15,6 +30,10 @@ interface EditorContextType {
   tensionFeedback: TensionFeedback[]
   routeIssues: RouteIssue[]
   simulationFrames: Record<string, ChaseSimulationFrame[]>
+  simulationResults: SimulationResults
+  caughtPoints: Record<string, CaughtPoint | null>
+  selectedCurveVersionIds: string[]
+  showAllVersions: boolean
   actions: {
     setProject: (project: ProjectData) => void
     selectSceneNode: (id: string | null) => void
@@ -29,10 +48,21 @@ interface EditorContextType {
     addRoute: (route: Omit<EscapeRoute, 'id'>) => void
     updateRoute: (id: string, updates: Partial<EscapeRoute>) => void
     removeRoute: (id: string) => void
+    reorderRouteWaypoint: (routeId: string, fromIndex: number, toIndex: number) => void
+    toggleWaypointJunction: (waypointId: string) => void
+    toggleWaypointDeadEnd: (waypointId: string) => void
     startSimulation: () => void
     stopSimulation: () => void
     setSimulationTime: (time: number) => void
     runFullAnalysis: () => void
+    simulateRoute: (routeId: string) => void
+    saveTensionCurveVersion: (name: string, description: string) => void
+    deleteTensionCurveVersion: (versionId: string) => void
+    toggleCurveVersion: (versionId: string) => void
+    setShowAllVersions: (show: boolean) => void
+    saveProject: () => Promise<{ success: boolean; path?: string }>
+    loadProject: (data: ProjectData) => void
+    newProject: () => void
   }
 }
 
@@ -48,6 +78,59 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [tensionFeedback, setTensionFeedback] = useState<TensionFeedback[]>([])
   const [routeIssues, setRouteIssues] = useState<RouteIssue[]>([])
   const [simulationFrames, setSimulationFrames] = useState<Record<string, ChaseSimulationFrame[]>>({})
+  const [simulationResults, setSimulationResults] = useState<SimulationResults>({})
+  const [caughtPoints, setCaughtPoints] = useState<Record<string, CaughtPoint | null>>({})
+  const [selectedCurveVersionIds, setSelectedCurveVersionIds] = useState<string[]>([])
+  const [showAllVersions, setShowAllVersions] = useState(false)
+
+  const runFullAnalysis = useCallback(() => {
+    const curve = calculateTensionCurve(project.sceneNodes)
+    setTensionCurve(curve)
+    setTensionFeedback(analyzeTensionCurve(curve))
+
+    const frames: Record<string, ChaseSimulationFrame[]> = {}
+    const results: SimulationResults = {}
+    const caught: Record<string, CaughtPoint | null> = {}
+    const allIssues: RouteIssue[] = []
+
+    project.routes.forEach(route => {
+      const waypoints = route.waypointIds
+        .map(wid => project.waypoints.find(w => w.id === wid))
+        .filter(Boolean) as MapWaypoint[]
+      const result = simulateChase(waypoints, route.playerSpeed, route.monsterSpeed)
+      results[route.id] = result
+      frames[route.id] = result.frames
+      caught[route.id] = result.caughtPoint ? { ...result.caughtPoint, routeId: route.id } : null
+      allIssues.push(...analyzeRouteIssues(result, route, waypoints))
+    })
+
+    setSimulationFrames(frames)
+    setSimulationResults(results)
+    setCaughtPoints(caught)
+    setRouteIssues(allIssues)
+  }, [project])
+
+  const simulateRoute = useCallback((routeId: string) => {
+    const route = project.routes.find(r => r.id === routeId)
+    if (!route) return
+
+    const waypoints = route.waypointIds
+      .map(wid => project.waypoints.find(w => w.id === wid))
+      .filter(Boolean) as MapWaypoint[]
+    const result = simulateChase(waypoints, route.playerSpeed, route.monsterSpeed)
+    const issues = analyzeRouteIssues(result, route, waypoints)
+
+    setSimulationResults(prev => ({ ...prev, [routeId]: result }))
+    setSimulationFrames(prev => ({ ...prev, [routeId]: result.frames }))
+    setCaughtPoints(prev => ({
+      ...prev,
+      [routeId]: result.caughtPoint ? { ...result.caughtPoint, routeId } : null,
+    }))
+    setRouteIssues(prev => [
+      ...prev.filter(i => i.routeId !== routeId),
+      ...issues,
+    ])
+  }, [project])
 
   const updateSceneNode = useCallback((id: string, updates: Partial<SceneNode>) => {
     setProject(prev => ({
@@ -107,6 +190,24 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }))
   }, [])
 
+  const toggleWaypointJunction = useCallback((waypointId: string) => {
+    setProject(prev => ({
+      ...prev,
+      waypoints: prev.waypoints.map(w =>
+        w.id === waypointId ? { ...w, isJunction: !w.isJunction } : w
+      ),
+    }))
+  }, [])
+
+  const toggleWaypointDeadEnd = useCallback((waypointId: string) => {
+    setProject(prev => ({
+      ...prev,
+      waypoints: prev.waypoints.map(w =>
+        w.id === waypointId ? { ...w, isDeadEnd: !w.isDeadEnd } : w
+      ),
+    }))
+  }, [])
+
   const addRoute = useCallback((route: Omit<EscapeRoute, 'id'>) => {
     const newRoute: EscapeRoute = { ...route, id: uuidv4() }
     setProject(prev => ({
@@ -118,7 +219,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const updateRoute = useCallback((id: string, updates: Partial<EscapeRoute>) => {
     setProject(prev => ({
       ...prev,
-      routes: prev.routes.map(r => r.id === id ? { ...r, ...updates } : r),
+      routes: prev.routes.map(r => (r.id === id ? { ...r, ...updates } : r)),
     }))
   }, [])
 
@@ -132,34 +233,124 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   }, [selectedRouteId])
 
-  const runFullAnalysis = useCallback(() => {
-    const curve = calculateTensionCurve(project.sceneNodes)
-    setTensionCurve(curve)
-    setTensionFeedback(analyzeTensionCurve(curve))
-
-    const frames: Record<string, ChaseSimulationFrame[]> = {}
-    const allIssues: RouteIssue[] = []
-
-    project.routes.forEach(route => {
-      const waypoints = route.waypointIds
-        .map(wid => project.waypoints.find(w => w.id === wid))
-        .filter(Boolean) as MapWaypoint[]
-      const routeFrames = simulateChase(waypoints, route.playerSpeed, route.monsterSpeed)
-      frames[route.id] = routeFrames
-      allIssues.push(...analyzeRouteIssues(routeFrames, route, waypoints))
-    })
-
-    setSimulationFrames(frames)
-    setRouteIssues(allIssues)
-  }, [project])
+  const reorderRouteWaypoint = useCallback((routeId: string, fromIndex: number, toIndex: number) => {
+    setProject(prev => ({
+      ...prev,
+      routes: prev.routes.map(r => {
+        if (r.id !== routeId) return r
+        const newIds = [...r.waypointIds]
+        const [removed] = newIds.splice(fromIndex, 1)
+        newIds.splice(toIndex, 0, removed)
+        return { ...r, waypointIds: newIds }
+      }),
+    }))
+  }, [])
 
   const startSimulation = useCallback(() => {
+    if (selectedRouteId) {
+      simulateRoute(selectedRouteId)
+    }
+    setSimulationTime(0)
     setIsSimulating(true)
-  }, [])
+  }, [selectedRouteId, simulateRoute])
 
   const stopSimulation = useCallback(() => {
     setIsSimulating(false)
   }, [])
+
+  const saveTensionCurveVersion = useCallback((name: string, description: string) => {
+    const curve = calculateTensionCurve(project.sceneNodes)
+    const feedback = analyzeTensionCurve(curve)
+    const version: TensionCurveVersion = {
+      id: uuidv4(),
+      name,
+      description,
+      createdAt: Date.now(),
+      curve,
+      feedback,
+      sceneNodes: JSON.parse(JSON.stringify(project.sceneNodes)),
+    }
+    setProject(prev => ({
+      ...prev,
+      tensionCurveVersions: [...prev.tensionCurveVersions, version],
+    }))
+    setTensionCurve(curve)
+    setTensionFeedback(feedback)
+  }, [project.sceneNodes])
+
+  const deleteTensionCurveVersion = useCallback((versionId: string) => {
+    setProject(prev => ({
+      ...prev,
+      tensionCurveVersions: prev.tensionCurveVersions.filter(v => v.id !== versionId),
+    }))
+    setSelectedCurveVersionIds(prev => prev.filter(id => id !== versionId))
+  }, [])
+
+  const toggleCurveVersion = useCallback((versionId: string) => {
+    setSelectedCurveVersionIds(prev =>
+      prev.includes(versionId)
+        ? prev.filter(id => id !== versionId)
+        : [...prev, versionId]
+    )
+  }, [])
+
+  const saveProject = useCallback(async () => {
+    if (typeof window !== 'undefined' && (window as any).electronAPI) {
+      return (window as any).electronAPI.saveProject(project)
+    }
+    return { success: false }
+  }, [project])
+
+  const loadProject = useCallback((data: ProjectData) => {
+    setProject(data)
+    setSelectedRouteId(data.routes[0]?.id || null)
+    setSelectedSceneNodeId(null)
+    setSimulationFrames({})
+    setSimulationResults({})
+    setCaughtPoints({})
+    setRouteIssues([])
+    setTensionCurve([])
+    setTensionFeedback([])
+    setSelectedCurveVersionIds([])
+  }, [])
+
+  const newProject = useCallback(() => {
+    const newProj: ProjectData = {
+      name: '未命名项目',
+      sceneNodes: [],
+      waypoints: [],
+      routes: [],
+      tensionCurveVersions: [],
+    }
+    loadProject(newProj)
+  }, [loadProject])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !(window as any).electronAPI) return
+    const api = (window as any).electronAPI
+
+    const unsubNew = api.onNewProject(() => newProject())
+    const unsubLoad = api.onLoadProject((data: ProjectData) => loadProject(data))
+    const unsubSave = api.onRequestSave(() => saveProject())
+    const unsubAnalysis = api.onRunAnalysis(() => runFullAnalysis())
+    const unsubPlay = api.onPlayChase(() => startSimulation())
+    const unsubSaveVer = api.onSaveCurveVersion(() => {
+      const name = prompt('版本名称：', `版本 ${project.tensionCurveVersions.length + 1}`)
+      if (name) {
+        const desc = prompt('版本描述（可选）：', '') || ''
+        saveTensionCurveVersion(name, desc)
+      }
+    })
+
+    return () => {
+      unsubNew()
+      unsubLoad()
+      unsubSave()
+      unsubAnalysis()
+      unsubPlay()
+      unsubSaveVer()
+    }
+  }, [newProject, loadProject, saveProject, runFullAnalysis, startSimulation, saveTensionCurveVersion, project.tensionCurveVersions.length])
 
   return (
     <EditorContext.Provider
@@ -173,6 +364,10 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         tensionFeedback,
         routeIssues,
         simulationFrames,
+        simulationResults,
+        caughtPoints,
+        selectedCurveVersionIds,
+        showAllVersions,
         actions: {
           setProject,
           selectSceneNode: setSelectedSceneNodeId,
@@ -187,10 +382,21 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           addRoute,
           updateRoute,
           removeRoute,
+          reorderRouteWaypoint,
+          toggleWaypointJunction,
+          toggleWaypointDeadEnd,
           startSimulation,
           stopSimulation,
           setSimulationTime,
           runFullAnalysis,
+          simulateRoute,
+          saveTensionCurveVersion,
+          deleteTensionCurveVersion,
+          toggleCurveVersion,
+          setShowAllVersions,
+          saveProject,
+          loadProject,
+          newProject,
         },
       }}
     >

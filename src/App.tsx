@@ -38,10 +38,36 @@ const TabButton: React.FC<{
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('timeline')
   const { project, actions } = useEditor()
+  const [isElectron, setIsElectron] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
+    setIsElectron(typeof window !== 'undefined' && !!(window as any).electronAPI)
     actions.runFullAnalysis()
   }, [])
+
+  const handleSave = async () => {
+    setSaveStatus('saving')
+    try {
+      const result = await actions.saveProject()
+      if (result.success) {
+        setSaveStatus('saved')
+        setTimeout(() => setSaveStatus('idle'), 2000)
+      } else {
+        setSaveStatus('error')
+        setTimeout(() => setSaveStatus('idle'), 2000)
+      }
+    } catch {
+      setSaveStatus('error')
+      setTimeout(() => setSaveStatus('idle'), 2000)
+    }
+  }
+
+  const handleLoad = async () => {
+    if (typeof window !== 'undefined' && (window as any).electronAPI) {
+      (window as any).electronAPI.openProject()
+    }
+  }
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-950 via-gray-900 to-purple-950/30">
@@ -54,13 +80,53 @@ const AppContent: React.FC = () => {
             <h1 className="text-lg font-bold text-gray-100">追逐段落导演编辑器</h1>
             <p className="text-xs text-gray-500">Chase Sequence Director · 为独立叙事恐怖游戏作者打造</p>
           </div>
+          {isElectron && (
+            <span className="ml-2 px-2 py-0.5 bg-purple-900/50 border border-purple-700 rounded text-[10px] text-purple-300">
+              💻 桌面版
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {isElectron && (
+            <>
+              <button
+                onClick={() => actions.newProject()}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-sm text-gray-300 transition-all"
+                title="新建项目 (Ctrl+N)"
+              >
+                📄 新建
+              </button>
+              <button
+                onClick={handleLoad}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-sm text-gray-300 transition-all"
+                title="打开项目 (Ctrl+O)"
+              >
+                📂 打开
+              </button>
+              <button
+                onClick={handleSave}
+                className={`px-3 py-1.5 rounded text-sm transition-all border ${
+                  saveStatus === 'saving'
+                    ? 'bg-amber-900/50 border-amber-700 text-amber-300'
+                    : saveStatus === 'saved'
+                    ? 'bg-green-900/50 border-green-700 text-green-300'
+                    : saveStatus === 'error'
+                    ? 'bg-red-900/50 border-red-700 text-red-300'
+                    : 'bg-gray-800 hover:bg-gray-700 border-gray-600 text-gray-300'
+                }`}
+                title="保存项目 (Ctrl+S)"
+              >
+                {saveStatus === 'saving' ? '💾 保存中...' : saveStatus === 'saved' ? '✓ 已保存' : saveStatus === 'error' ? '✗ 保存失败' : '💾 保存'}
+              </button>
+              <div className="w-px h-6 bg-gray-700 mx-1" />
+            </>
+          )}
           <input
             type="text"
             value={project.name}
             onChange={e => actions.setProject({ ...project, name: e.target.value })}
             className="bg-gray-800/60 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-purple-500 w-64"
+            placeholder="项目名称"
           />
           <button
             onClick={() => actions.runFullAnalysis()}

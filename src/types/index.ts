@@ -83,9 +83,27 @@ export interface TensionFeedback {
   severity: 'warning' | 'critical' | 'success'
 }
 
+export interface TensionCurveVersion {
+  id: string
+  name: string
+  createdAt: number
+  curve: TensionCurvePoint[]
+  feedback: TensionFeedback[]
+  sceneNodes: SceneNode[]
+  description: string
+}
+
+export interface CaughtPoint {
+  id: string
+  position: MapPosition
+  time: number
+  routeId: string
+}
+
 export interface ProjectData {
   name: string
   sceneNodes: SceneNode[]
   waypoints: MapWaypoint[]
   routes: EscapeRoute[]
+  tensionCurveVersions: TensionCurveVersion[]
 }
