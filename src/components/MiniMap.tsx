@@ -113,8 +113,36 @@ export const MiniMap: React.FC = () => {
       finalDistance: result.finalDistance,
       minDistance: minDist,
       avgDistance: Math.round(avgDist),
+      stuckCount: result.stuckPoints.length,
     }
   }, [result, frames])
+
+  const allRouteSummaries = useMemo(() => {
+    return project.routes.map(route => {
+      const r = simulationResults[route.id]
+      const issues = routeIssues.filter(i => i.routeId === route.id)
+      const criticalCount = issues.filter(i => i.severity === 'critical').length
+      const distValues = r?.frames.map(f => f.distance) ?? []
+      const minDist = distValues.length > 0 ? Math.min(...distValues) : 0
+      let dangerScore = 0
+      if (r) {
+        if (!r.success) dangerScore += 100
+        dangerScore += criticalCount * 30
+        if (minDist < 30) dangerScore += 25
+        else if (minDist < 60) dangerScore += 10
+        dangerScore += r.stuckPoints.length * 20
+      }
+      return {
+        route,
+        result: r,
+        dangerScore: Math.min(100, dangerScore),
+        criticalCount,
+        warningCount: issues.length - criticalCount,
+        minDistance: minDist,
+        totalTime: r?.totalTime ?? 0,
+      }
+    }).sort((a, b) => b.dangerScore - a.dangerScore)
+  }, [project.routes, simulationResults, routeIssues])
 
   return (
     <div className="flex-1 flex flex-col bg-gray-900/40 rounded-lg border border-gray-700 overflow-hidden">
@@ -133,8 +161,13 @@ export const MiniMap: React.FC = () => {
                 总时长: <span className="text-white font-mono">{stats.totalTime.toFixed(1)}s</span>
               </span>
               <span className="text-gray-400">
-                最近距离: <span className={stats.minDistance < 30 ? 'text-red-400' : 'text-white font-mono'}>{stats.minDistance}</span>
+                最近距离: <span className={stats.minDistance < 30 ? 'text-red-400 font-mono' : 'text-white font-mono'}>{stats.minDistance}</span>
               </span>
+              {stats.stuckCount > 0 && (
+                <span className="text-red-400">
+                  🚫 卡死点: {stats.stuckCount}
+                </span>
+              )}
             </div>
           )}
           <button
@@ -407,6 +440,62 @@ export const MiniMap: React.FC = () => {
           )}
         </svg>
       </div>
+
+      {allRouteSummaries.length >= 1 && (
+        <div className="border-t border-gray-700 bg-gray-900/80 px-4 py-3 flex-shrink-0">
+          <h4 className="text-xs font-semibold text-purple-300 mb-2 uppercase tracking-wider">路线调度复盘 · 危险度排名</h4>
+          <div className="flex gap-2 flex-wrap">
+            {allRouteSummaries.map((summary, idx) => {
+              const isSelected = summary.route.id === selectedRouteId
+              const dangerColor = summary.dangerScore >= 70
+                ? '#ef4444'
+                : summary.dangerScore >= 40
+                  ? '#f59e0b'
+                  : '#22c55e'
+              return (
+                <button
+                  key={summary.route.id}
+                  onClick={() => actions.selectRoute(summary.route.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded text-xs transition-all ${
+                    isSelected
+                      ? 'bg-purple-900/50 border border-purple-500 ring-1 ring-purple-400/50'
+                      : 'bg-gray-800/60 border border-gray-700 hover:border-gray-600'
+                  }`}
+                >
+                  <span className="text-[10px] font-mono text-gray-500">#{idx + 1}</span>
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: summary.route.color }} />
+                  <span className="text-gray-200 font-medium max-w-16 truncate">{summary.route.name}</span>
+                  {summary.result ? (
+                    <>
+                      <span className={summary.result.success ? 'text-green-400' : 'text-red-400'}>
+                        {summary.result.success ? '逃脱' : '被抓'}
+                      </span>
+                      <span className="text-gray-400 font-mono">{summary.totalTime.toFixed(1)}s</span>
+                      <span className="text-gray-400">
+                        最近:<span className={summary.minDistance < 30 ? 'text-red-400 font-mono' : 'text-gray-300 font-mono'}>{summary.minDistance}</span>
+                      </span>
+                      {summary.criticalCount > 0 && (
+                        <span className="text-red-400">💀{summary.criticalCount}</span>
+                      )}
+                      <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${summary.dangerScore}%`, backgroundColor: dangerColor }}
+                        />
+                      </div>
+                      <span className="font-mono" style={{ color: dangerColor }}>
+                        {summary.dangerScore}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-gray-500">未模拟</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -83,6 +83,35 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [selectedCurveVersionIds, setSelectedCurveVersionIds] = useState<string[]>([])
   const [showAllVersions, setShowAllVersions] = useState(false)
 
+  const refreshAllRouteSimulations = useCallback((proj: ProjectData) => {
+    const frames: Record<string, ChaseSimulationFrame[]> = {}
+    const results: SimulationResults = {}
+    const caught: Record<string, CaughtPoint | null> = {}
+    const allIssues: RouteIssue[] = []
+
+    proj.routes.forEach(route => {
+      const waypoints = route.waypointIds
+        .map(wid => proj.waypoints.find(w => w.id === wid))
+        .filter(Boolean) as MapWaypoint[]
+      const result = simulateChase(waypoints, route.playerSpeed, route.monsterSpeed)
+      results[route.id] = result
+      frames[route.id] = result.frames
+      caught[route.id] = result.caughtPoint ? { ...result.caughtPoint, routeId: route.id } : null
+      allIssues.push(...analyzeRouteIssues(result, route, waypoints))
+    })
+
+    setSimulationFrames(frames)
+    setSimulationResults(results)
+    setCaughtPoints(caught)
+    setRouteIssues(allIssues)
+  }, [])
+
+  const refreshTensionAnalysis = useCallback((proj: ProjectData) => {
+    const curve = calculateTensionCurve(proj.sceneNodes)
+    setTensionCurve(curve)
+    setTensionFeedback(analyzeTensionCurve(curve))
+  }, [])
+
   const runFullAnalysis = useCallback(() => {
     const curve = calculateTensionCurve(project.sceneNodes)
     setTensionCurve(curve)
@@ -251,8 +280,16 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       simulateRoute(selectedRouteId)
     }
     setSimulationTime(0)
-    setIsSimulating(true)
+    setTimeout(() => setIsSimulating(true), 50)
   }, [selectedRouteId, simulateRoute])
+
+  useEffect(() => {
+    refreshAllRouteSimulations(project)
+  }, [project.routes, project.waypoints, refreshAllRouteSimulations])
+
+  useEffect(() => {
+    refreshTensionAnalysis(project)
+  }, [project.sceneNodes, refreshTensionAnalysis])
 
   const stopSimulation = useCallback(() => {
     setIsSimulating(false)

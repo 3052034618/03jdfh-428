@@ -31,16 +31,31 @@ export const calculateTensionCurve = (sceneNodes: SceneNode[]): TensionCurvePoin
       sceneNodeId = currentNode.id
       const nodeProgress = (time - currentNode.startOffset) / currentNode.duration
       const baseValue = TENSION_BASE_VALUES[currentNode.tensionLevel]
+
       const monsterInfluence = time >= currentNode.startOffset + currentNode.monsterSpawnDelay
         ? Math.min(1, (time - currentNode.startOffset - currentNode.monsterSpawnDelay) / 3) * 15
         : 0
+
+      const doorLockDelay = currentNode.doorLockDelay
+      let doorLockInfluence = 0
+      if (doorLockDelay > 0) {
+        const doorLockStart = currentNode.startOffset + Math.max(0, currentNode.duration * 0.4)
+        const doorLockEnd = doorLockStart + doorLockDelay
+        if (time >= doorLockStart && time <= doorLockEnd) {
+          const lockProgress = Math.min(1, (time - doorLockStart) / Math.max(0.1, doorLockDelay))
+          doorLockInfluence = Math.sin(lockProgress * Math.PI) * Math.min(25, doorLockDelay * 3)
+        } else if (time > doorLockEnd && time < doorLockEnd + 2) {
+          doorLockInfluence = Math.max(0, 15 - (time - doorLockEnd) * 7)
+        }
+      }
+
       const breathInfluence = currentNode.breathIntensity * 10
       const flickerInfluence = currentNode.lightFlickerIntensity * 8
       const burstBoost = currentNode.tensionLevel === 'burst'
         ? Math.sin(nodeProgress * Math.PI) * 15
         : 0
 
-      tension = Math.min(TENSION_MAX, baseValue + monsterInfluence + breathInfluence + flickerInfluence + burstBoost)
+      tension = Math.min(TENSION_MAX, baseValue + monsterInfluence + doorLockInfluence + breathInfluence + flickerInfluence + burstBoost)
       label = currentNode.name
     } else if (prevNode && nextNode) {
       const gapStart = prevNode.startOffset + prevNode.duration
