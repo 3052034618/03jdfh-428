@@ -9,7 +9,7 @@ import {
   TENSION_LABELS,
   PX_PER_SECOND,
 } from '../constants/config'
-import type { TensionLevel, TensionCurveVersion } from '../types'
+import type { TensionLevel, TensionCurveVersion, TensionVersionDiff } from '../types'
 
 const CHART_HEIGHT = 320
 const PADDING = { top: 20, right: 20, bottom: 40, left: 50 }
@@ -39,6 +39,14 @@ export const TensionCurveChart: React.FC = () => {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [versionName, setVersionName] = useState('')
   const [versionDesc, setVersionDesc] = useState('')
+  const [diffMode, setDiffMode] = useState(false)
+  const [diffBaseId, setDiffBaseId] = useState<string>('')
+  const [diffTargetId, setDiffTargetId] = useState<string>('')
+
+  const versionDiff = useMemo((): TensionVersionDiff | null => {
+    if (!diffMode || !diffBaseId || !diffTargetId) return null
+    return actions.calculateVersionDiff(diffBaseId, diffTargetId)
+  }, [diffMode, diffBaseId, diffTargetId, actions])
 
   const selectedVersions = showAllVersions
     ? project.tensionCurveVersions
@@ -122,6 +130,47 @@ export const TensionCurveChart: React.FC = () => {
           >
             💾 保存版本
           </button>
+          <div className="w-px h-5 bg-gray-600 mx-1" />
+          <button
+            onClick={() => {
+              setDiffMode(!diffMode)
+              if (!diffMode && project.tensionCurveVersions.length >= 2) {
+                setDiffBaseId(project.tensionCurveVersions[0].id)
+                setDiffTargetId(project.tensionCurveVersions[1].id)
+              }
+            }}
+            disabled={project.tensionCurveVersions.length < 2}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              diffMode
+                ? 'bg-cyan-700 hover:bg-cyan-600 text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:bg-gray-800 disabled:text-gray-600'
+            }`}
+          >
+            📊 {diffMode ? '关闭差异' : '版本差异对比'}
+          </button>
+          {diffMode && (
+            <>
+              <select
+                value={diffBaseId}
+                onChange={e => setDiffBaseId(e.target.value)}
+                className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-cyan-500"
+              >
+                {project.tensionCurveVersions.map(v => (
+                  <option key={v.id} value={v.id}>基础: {v.name}</option>
+                ))}
+              </select>
+              <span className="text-gray-500">→</span>
+              <select
+                value={diffTargetId}
+                onChange={e => setDiffTargetId(e.target.value)}
+                className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-cyan-500"
+              >
+                {project.tensionCurveVersions.map(v => (
+                  <option key={v.id} value={v.id}>对比: {v.name}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
       </div>
 
@@ -481,8 +530,147 @@ export const TensionCurveChart: React.FC = () => {
             >
               时间 (秒)
             </text>
+
+            {versionDiff && versionDiff.significantChanges.map((change, idx) => (
+              <g key={idx}>
+                <line
+                  x1={timeToX(change.time)}
+                  y1={PADDING.top}
+                  x2={timeToX(change.time)}
+                  y2={PADDING.top + innerHeight}
+                  stroke={change.valueDiff > 0 ? '#ef4444' : '#22c55e'}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  opacity={0.5}
+                />
+                <circle
+                  cx={timeToX(change.time)}
+                  cy={valueToY((change.baseValue + change.targetValue) / 2)}
+                  r={8}
+                  fill={change.valueDiff > 0 ? '#ef4444' : '#22c55e'}
+                  opacity={0.8}
+                />
+                <rect
+                  x={timeToX(change.time) - 25}
+                  y={valueToY((change.baseValue + change.targetValue) / 2) - 18}
+                  width={50}
+                  height={16}
+                  fill={change.valueDiff > 0 ? '#7f1d1d' : '#14532d'}
+                  rx={3}
+                />
+                <text
+                  x={timeToX(change.time)}
+                  y={valueToY((change.baseValue + change.targetValue) / 2) - 7}
+                  textAnchor="middle"
+                  fill={change.valueDiff > 0 ? '#fca5a5' : '#86efac'}
+                  fontSize="10"
+                  fontWeight="bold"
+                >
+                  {change.valueDiff > 0 ? '+' : ''}{change.valueDiff}
+                </text>
+              </g>
+            ))}
           </svg>
         </div>
+
+        {versionDiff && (
+          <div className="border-t border-gray-700 bg-gray-900/60 p-4 flex-shrink-0">
+            <h4 className="text-xs font-semibold text-cyan-300 mb-3 uppercase tracking-wider">
+              📊 版本差异分析 · {versionDiff.baseName} → {versionDiff.targetName}
+              <span className="text-gray-500 font-normal ml-2">
+                （间隔 {versionDiff.timeDiff > 60 ? `${Math.floor(versionDiff.timeDiff / 60)}分${versionDiff.timeDiff % 60}秒` : `${versionDiff.timeDiff}秒`}）
+              </span>
+            </h4>
+            <div className="grid grid-cols-6 gap-3 mb-4">
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">峰值变化</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.peakValueChange > 0 ? 'text-red-400' : versionDiff.peakValueChange < 0 ? 'text-green-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.peakValueChange > 0 ? '↑' : versionDiff.peakValueChange < 0 ? '↓' : '→'} {Math.abs(versionDiff.peakValueChange)}
+                </div>
+              </div>
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">峰值位置</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.peakTimeChange > 0 ? 'text-amber-400' : versionDiff.peakTimeChange < 0 ? 'text-cyan-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.peakTimeChange > 0 ? '↦' : versionDiff.peakTimeChange < 0 ? '↤' : '→'} {Math.abs(versionDiff.peakTimeChange).toFixed(1)}s
+                </div>
+              </div>
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">平均紧张</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.avgValueChange > 0 ? 'text-red-400' : versionDiff.avgValueChange < 0 ? 'text-green-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.avgValueChange > 0 ? '↑' : versionDiff.avgValueChange < 0 ? '↓' : '→'} {Math.abs(versionDiff.avgValueChange)}
+                </div>
+              </div>
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">恢复时间</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.recoveryTimeChange > 0 ? 'text-amber-400' : versionDiff.recoveryTimeChange < 0 ? 'text-green-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.recoveryTimeChange > 0 ? '↑' : versionDiff.recoveryTimeChange < 0 ? '↓' : '→'} {Math.abs(versionDiff.recoveryTimeChange).toFixed(1)}s
+                </div>
+              </div>
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">门锁影响</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.doorLockImpactChange > 0 ? 'text-red-400' : versionDiff.doorLockImpactChange < 0 ? 'text-green-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.doorLockImpactChange > 0 ? '↑' : versionDiff.doorLockImpactChange < 0 ? '↓' : '→'} {Math.abs(versionDiff.doorLockImpactChange)}
+                </div>
+              </div>
+              <div className="bg-gray-800/60 rounded p-3 border border-gray-700">
+                <div className="text-[10px] text-gray-500 mb-1">爆发点数量</div>
+                <div
+                  className={`text-lg font-bold font-mono ${
+                    versionDiff.peakCountChange > 0 ? 'text-red-400' : versionDiff.peakCountChange < 0 ? 'text-green-400' : 'text-gray-400'
+                  }`}
+                >
+                  {versionDiff.peakCountChange > 0 ? '↑' : versionDiff.peakCountChange < 0 ? '↓' : '→'} {Math.abs(versionDiff.peakCountChange)}
+                </div>
+              </div>
+            </div>
+
+            {versionDiff.significantChanges.length > 0 && (
+              <div>
+                <div className="text-[10px] text-gray-500 mb-2">显著变化点（≥10）</div>
+                <div className="flex flex-wrap gap-2">
+                  {versionDiff.significantChanges.slice(0, 8).map((change, idx) => (
+                    <span
+                      key={idx}
+                      className={`text-[10px] px-2 py-1 rounded ${
+                        change.type === 'door'
+                          ? 'bg-amber-900/40 text-amber-300 border border-amber-700/50'
+                          : change.type === 'recovery'
+                            ? 'bg-green-900/40 text-green-300 border border-green-700/50'
+                            : change.valueDiff > 0
+                              ? 'bg-red-900/40 text-red-300 border border-red-700/50'
+                              : 'bg-cyan-900/40 text-cyan-300 border border-cyan-700/50'
+                      }`}
+                    >
+                      ⏱{change.time.toFixed(1)}s · {change.label} · {change.valueDiff > 0 ? '+' : ''}{change.valueDiff}
+                      {change.type === 'door' && ' 🔒'}
+                      {change.type === 'recovery' && ' 💚'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

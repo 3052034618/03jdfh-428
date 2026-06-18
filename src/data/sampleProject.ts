@@ -115,5 +115,6 @@ export const createSampleProject = (): ProjectData => {
     waypoints,
     routes,
     tensionCurveVersions: [],
+    simulationRecords: [],
   }
 }

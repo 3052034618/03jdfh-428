@@ -7,6 +7,7 @@ import { MiniMap } from './components/MiniMap'
 import { RoutePanel } from './components/RoutePanel'
 import { TensionCurveChart } from './components/TensionCurveChart'
 import { TensionFeedbackPanel } from './components/TensionFeedbackPanel'
+import { SimulationRecordPanel } from './components/SimulationRecordPanel'
 
 type TabId = 'timeline' | 'routes' | 'tension'
 
@@ -37,9 +38,10 @@ const TabButton: React.FC<{
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('timeline')
-  const { project, actions } = useEditor()
+  const { project, actions, isDirty, filePath } = useEditor()
   const [isElectron, setIsElectron] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
 
   useEffect(() => {
     setIsElectron(typeof window !== 'undefined' && !!(window as any).electronAPI)
@@ -63,10 +65,33 @@ const AppContent: React.FC = () => {
     }
   }
 
+  const handleNewProject = () => {
+    if (isDirty) {
+      if (confirm('当前项目有未保存的更改，确定要新建项目吗？')) {
+        actions.newProject()
+      }
+    } else {
+      actions.newProject()
+    }
+  }
+
   const handleLoad = async () => {
+    if (isDirty) {
+      if (!confirm('当前项目有未保存的更改，确定要打开另一个项目吗？')) {
+        return
+      }
+    }
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
       (window as any).electronAPI.openProject()
     }
+  }
+
+  const getFileName = () => {
+    if (filePath) {
+      const parts = filePath.split(/[\\/]/)
+      return parts[parts.length - 1]
+    }
+    return null
   }
 
   return (
@@ -77,20 +102,40 @@ const AppContent: React.FC = () => {
             🎬
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-100">追逐段落导演编辑器</h1>
-            <p className="text-xs text-gray-500">Chase Sequence Director · 为独立叙事恐怖游戏作者打造</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-100">追逐段落导演编辑器</h1>
+              {isElectron && (
+                <span className="px-2 py-0.5 bg-purple-900/50 border border-purple-700 rounded text-[10px] text-purple-300">
+                  💻 桌面版
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              {filePath ? (
+                <>
+                  <span className="text-gray-400 font-mono">
+                    {getFileName()}
+                    {isDirty && <span className="text-amber-400 ml-1">●</span>}
+                  </span>
+                  <span className="text-gray-600">·</span>
+                  <span className="text-gray-500" title={filePath}>
+                    {filePath}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-gray-500">未保存的项目</span>
+                  {isDirty && <span className="text-amber-400 ml-1">● 有未保存的更改</span>}
+                </>
+              )}
+            </div>
           </div>
-          {isElectron && (
-            <span className="ml-2 px-2 py-0.5 bg-purple-900/50 border border-purple-700 rounded text-[10px] text-purple-300">
-              💻 桌面版
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
           {isElectron && (
             <>
               <button
-                onClick={() => actions.newProject()}
+                onClick={handleNewProject}
                 className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-sm text-gray-300 transition-all"
                 title="新建项目 (Ctrl+N)"
               >
@@ -112,11 +157,13 @@ const AppContent: React.FC = () => {
                     ? 'bg-green-900/50 border-green-700 text-green-300'
                     : saveStatus === 'error'
                     ? 'bg-red-900/50 border-red-700 text-red-300'
+                    : isDirty
+                    ? 'bg-amber-800/40 hover:bg-amber-700/50 border-amber-600/60 text-amber-300'
                     : 'bg-gray-800 hover:bg-gray-700 border-gray-600 text-gray-300'
                 }`}
                 title="保存项目 (Ctrl+S)"
               >
-                {saveStatus === 'saving' ? '💾 保存中...' : saveStatus === 'saved' ? '✓ 已保存' : saveStatus === 'error' ? '✗ 保存失败' : '💾 保存'}
+                {saveStatus === 'saving' ? '💾 保存中...' : saveStatus === 'saved' ? '✓ 已保存' : saveStatus === 'error' ? '✗ 保存失败' : isDirty ? '💾 保存*' : '💾 保存'}
               </button>
               <div className="w-px h-6 bg-gray-700 mx-1" />
             </>
@@ -185,6 +232,9 @@ const AppContent: React.FC = () => {
             </div>
             <div className="flex-1 flex flex-col min-w-0">
               <MiniMap />
+            </div>
+            <div className="w-72 flex-shrink-0 overflow-y-auto">
+              <SimulationRecordPanel />
             </div>
           </div>
         )}

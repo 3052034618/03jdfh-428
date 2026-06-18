@@ -194,7 +194,7 @@ ipcMain.handle('project:open', async (_event) => {
   })
   if (!result.canceled && result.filePaths[0]) {
     const content = fs.readFileSync(result.filePaths[0], 'utf-8')
-    mainWindow?.webContents.send('menu:load-project', JSON.parse(content))
+    mainWindow?.webContents.send('menu:load-project', JSON.parse(content), result.filePaths[0])
     return { success: true, path: result.filePaths[0] }
   }
   return { success: false }

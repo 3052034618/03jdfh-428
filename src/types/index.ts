@@ -100,10 +100,57 @@ export interface CaughtPoint {
   routeId: string
 }
 
+export interface RouteSimulationRecord {
+  id: string
+  routeId: string
+  routeName: string
+  routeColor: string
+  createdAt: number
+  playerSpeed: number
+  monsterSpeed: number
+  totalTime: number
+  success: boolean
+  finalDistance: number
+  minDistance: number
+  avgDistance: number
+  caughtPoint: CaughtPoint | null
+  stuckPoints: { position: MapPosition; waypointId: string; time: number }[]
+  criticalIssues: number
+  warningIssues: number
+  dangerScore: number
+  notes: string
+  keyMoments: { time: number; label: string; value: number }[]
+  waypointSnapshot: MapWaypoint[]
+}
+
+export interface TensionVersionDiff {
+  baseId: string
+  targetId: string
+  baseName: string
+  targetName: string
+  peakValueChange: number
+  peakTimeChange: number
+  avgValueChange: number
+  recoveryTimeChange: number
+  doorLockImpactChange: number
+  peakCountChange: number
+  significantChanges: {
+    time: number
+    valueDiff: number
+    baseValue: number
+    targetValue: number
+    label: string
+    type: 'peak' | 'valley' | 'door' | 'recovery'
+  }[]
+  timeDiff: number
+}
+
 export interface ProjectData {
   name: string
   sceneNodes: SceneNode[]
   waypoints: MapWaypoint[]
   routes: EscapeRoute[]
   tensionCurveVersions: TensionCurveVersion[]
+  simulationRecords: RouteSimulationRecord[]
+  filePath?: string
 }

@@ -27,6 +27,11 @@ export const MiniMap: React.FC = () => {
   const currentFrame = frames[frameIndex]
   const caughtPoint = selectedRoute ? caughtPoints[selectedRoute.id] : null
   const stuckPoints = result?.stuckPoints ?? []
+  const waypoints = selectedRoute
+    ? selectedRoute.waypointIds
+        .map(wid => project.waypoints.find(w => w.id === wid))
+        .filter(Boolean) as MapWaypoint[]
+    : []
 
   useEffect(() => {
     if (!isSimulating) return
@@ -188,10 +193,67 @@ export const MiniMap: React.FC = () => {
           >
             ■ 停止
           </button>
-          <span className="text-xs text-gray-400 font-mono">
+          <div className="flex-1 flex items-center gap-2 mx-3">
+            <span className="text-[10px] text-gray-500 w-8 text-right">0.0s</span>
+            <input
+              type="range"
+              min={0}
+              max={frames.length > 0 ? frames[frames.length - 1].time : 0}
+              step={0.1}
+              value={simulationTime}
+              onChange={e => {
+                const time = parseFloat(e.target.value)
+                actions.setSimulationTimeDirect(time)
+              }}
+              onMouseDown={() => actions.stopSimulation()}
+              className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+            />
+            <span className="text-[10px] text-gray-500 w-12 text-left">
+              {frames.length > 0 ? frames[frames.length - 1].time.toFixed(1) : 0}s
+            </span>
+          </div>
+          <span className="text-xs text-gray-400 font-mono w-14 text-right">
             {simulationTime.toFixed(1)}s
           </span>
         </div>
+        {currentFrame && (
+          <div className="px-4 py-2 border-t border-gray-700 bg-gray-900/60 flex items-center gap-4 text-xs flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-blue-400">🟢 玩家</span>
+              <span className="text-gray-400 font-mono">
+                ({currentFrame.playerPosition.x.toFixed(0)}, {currentFrame.playerPosition.y.toFixed(0)})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-red-400">🔴 怪物</span>
+              <span className="text-gray-400 font-mono">
+                ({currentFrame.monsterPosition.x.toFixed(0)}, {currentFrame.monsterPosition.y.toFixed(0)})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">最近距离:</span>
+              <span
+                className={`font-mono font-bold ${
+                  currentFrame.distance < 30 ? 'text-red-400' : currentFrame.distance < 60 ? 'text-amber-400' : 'text-green-400'
+                }`}
+              >
+                {currentFrame.distance.toFixed(1)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">紧张值:</span>
+              <span className="text-purple-400 font-mono font-bold">
+                {currentFrame.tension}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">路点:</span>
+              <span className="text-gray-300 font-mono">
+                #{currentFrame.waypointIndex + 1} / {waypoints.length}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-4 bg-gray-950">

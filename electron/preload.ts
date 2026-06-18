@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('menu:new-project', listener)
   },
   onLoadProject: (callback) => {
-    const listener = (_e, data) => callback(data)
+    const listener = (_e, data, path) => callback(data, path)
     ipcRenderer.on('menu:load-project', listener)
     return () => ipcRenderer.removeListener('menu:load-project', listener)
   },
