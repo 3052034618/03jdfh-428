@@ -8,6 +8,8 @@ import { RoutePanel } from './components/RoutePanel'
 import { TensionCurveChart } from './components/TensionCurveChart'
 import { TensionFeedbackPanel } from './components/TensionFeedbackPanel'
 import { SimulationRecordPanel } from './components/SimulationRecordPanel'
+import { TimeSlicePanel } from './components/TimeSlicePanel'
+import { WelcomePage } from './components/WelcomePage'
 
 type TabId = 'timeline' | 'routes' | 'tension'
 
@@ -38,7 +40,7 @@ const TabButton: React.FC<{
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('timeline')
-  const { project, actions, isDirty, filePath } = useEditor()
+  const { project, actions, isDirty, filePath, showWelcome } = useEditor()
   const [isElectron, setIsElectron] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
@@ -94,10 +96,21 @@ const AppContent: React.FC = () => {
     return null
   }
 
+  if (showWelcome) {
+    return <WelcomePage />
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-950 via-gray-900 to-purple-950/30">
       <header className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => actions.setShowWelcome(true)}
+            className="w-10 h-10 rounded-lg bg-gray-800 hover:bg-gray-700 flex items-center justify-center text-xl transition-colors border border-gray-700"
+            title="返回开始页"
+          >
+            🏠
+          </button>
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600 to-red-600 flex items-center justify-center text-xl shadow-lg shadow-purple-500/30">
             🎬
           </div>
@@ -227,11 +240,14 @@ const AppContent: React.FC = () => {
 
         {activeTab === 'routes' && (
           <div className="h-full flex gap-4">
-            <div className="w-80 flex-shrink-0 overflow-y-auto">
+            <div className="w-72 flex-shrink-0 overflow-y-auto">
               <RoutePanel />
             </div>
             <div className="flex-1 flex flex-col min-w-0">
               <MiniMap />
+            </div>
+            <div className="w-80 flex-shrink-0 overflow-y-auto">
+              <TimeSlicePanel />
             </div>
             <div className="w-72 flex-shrink-0 overflow-y-auto">
               <SimulationRecordPanel />

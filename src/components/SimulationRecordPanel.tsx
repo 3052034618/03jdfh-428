@@ -5,11 +5,12 @@ import type { RouteSimulationRecord } from '../types'
 const VERSION_COLORS = ['#a855f7', '#06b6d4', '#f59e0b', '#10b981', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
 export const SimulationRecordPanel: React.FC = () => {
-  const { project, actions, selectedRouteId } = useEditor()
+  const { project, actions, selectedRouteId, filePath } = useEditor()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editNotes, setEditNotes] = useState('')
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [saveNotes, setSaveNotes] = useState('')
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
 
   const formatTime = (ts: number) => {
     const d = new Date(ts)
@@ -50,13 +51,31 @@ export const SimulationRecordPanel: React.FC = () => {
           <h3 className="text-sm font-semibold text-purple-300 uppercase tracking-wider">路线复盘记录</h3>
           <p className="text-xs text-gray-500">保存模拟结果，跨项目对比路线危险度</p>
         </div>
-        <button
-          onClick={() => setShowSaveDialog(true)}
-          disabled={!selectedRouteId}
-          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs font-medium transition-colors"
-        >
-          💾 保存本次模拟
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              try {
+                setIsGeneratingReport(true)
+                const report = actions.generateExportReport()
+                actions.downloadReport(report)
+              } finally {
+                setTimeout(() => setIsGeneratingReport(false), 1000)
+              }
+            }}
+            disabled={project.simulationRecords.length === 0 || isGeneratingReport}
+            className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs font-medium transition-colors"
+            title="导出团队复盘报告 (HTML)"
+          >
+            {isGeneratingReport ? '⏳ 生成中...' : '📤 导出报告'}
+          </button>
+          <button
+            onClick={() => setShowSaveDialog(true)}
+            disabled={!selectedRouteId}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:text-gray-500 rounded text-xs font-medium transition-colors"
+          >
+            💾 保存模拟
+          </button>
+        </div>
       </div>
 
       {showSaveDialog && (

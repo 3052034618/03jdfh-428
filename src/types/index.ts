@@ -145,6 +145,55 @@ export interface TensionVersionDiff {
   timeDiff: number
 }
 
+export type TimeSliceEventType = 'caught' | 'stuck' | 'lost' | 'danger_close' | 'junction' | 'door_lock' | 'waypoint_reached'
+
+export interface TimeSliceEvent {
+  id: string
+  type: TimeSliceEventType
+  time: number
+  routeId: string
+  position: MapPosition
+  description: string
+  severity: 'info' | 'warning' | 'critical'
+  distance?: number
+  waypointId?: string
+  waypointLabel?: string
+}
+
+export interface DirectorNote {
+  id: string
+  time: number
+  routeId: string
+  content: string
+  createdAt: number
+  eventId?: string
+  eventType?: TimeSliceEventType
+  screenshotData?: string
+}
+
+export interface RecentProjectEntry {
+  filePath: string
+  fileName: string
+  projectName: string
+  lastSavedAt: number
+  lastOpenedAt: number
+  hasUnsavedChanges: boolean
+}
+
+export interface ExportReportData {
+  generatedAt: number
+  projectName: string
+  filePath?: string
+  routeRecords: {
+    record: RouteSimulationRecord
+    notes: DirectorNote[]
+    rank: number
+  }[]
+  versionDiffs: TensionVersionDiff[]
+  overallConclusion: string
+  recommendations: string[]
+}
+
 export interface ProjectData {
   name: string
   sceneNodes: SceneNode[]
@@ -152,5 +201,6 @@ export interface ProjectData {
   routes: EscapeRoute[]
   tensionCurveVersions: TensionCurveVersion[]
   simulationRecords: RouteSimulationRecord[]
+  directorNotes: DirectorNote[]
   filePath?: string
 }

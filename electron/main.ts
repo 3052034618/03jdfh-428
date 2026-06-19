@@ -63,8 +63,9 @@ const createMenu = () => {
               properties: ['openFile'],
             })
             if (!result.canceled && result.filePaths[0]) {
-              const content = fs.readFileSync(result.filePaths[0], 'utf-8')
-              mainWindow?.webContents.send('menu:load-project', JSON.parse(content))
+              const filePath = result.filePaths[0]
+              const content = fs.readFileSync(filePath, 'utf-8')
+              mainWindow?.webContents.send('menu:load-project', JSON.parse(content), filePath)
             }
           },
         },

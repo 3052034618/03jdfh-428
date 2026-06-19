@@ -1,9 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron')
+const nodeFs = require('fs')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   saveProject: (data) => ipcRenderer.invoke('project:save', data),
   openProject: () => ipcRenderer.invoke('project:open'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  fs: nodeFs,
   onNewProject: (callback) => {
     const listener = (_event, ...args) => callback(...args)
     ipcRenderer.on('menu:new-project', listener)
